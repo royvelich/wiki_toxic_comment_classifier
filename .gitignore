@@ -3,3 +3,4 @@ glove.6B/
 venv/
 all.zip
 glove.6B.zip
+*.pickle
