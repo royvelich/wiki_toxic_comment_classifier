@@ -119,10 +119,14 @@ class GloveModel:
     def token_to_embedding(self):
         return self._token_to_embedding
 
+    @property
+    def vocabulary_size(self):
+        return len(self._embeddings)
+
 
 class ToxicComments:
-    def __init__(self, glove_model):
-        self._glove_model = glove_model
+    def __init__(self, word_embeddings_model):
+        self._word_embeddings_model = word_embeddings_model
         self.initialize()
 
     def initialize(self):
@@ -144,7 +148,7 @@ class ToxicComments:
             with open(train_data_file_path, encoding="utf8") as csv_file:
                 dict_reader = csv.DictReader(csv_file)
                 for csv_row in dict_reader:
-                    toxic_comment = ToxicComment(csv_row, self._glove_model)
+                    toxic_comment = ToxicComment(csv_row, self._word_embeddings_model)
                     self._toxic_comments_train_data.append(toxic_comment)
 
             with open('.\\toxic_comments_train_data.pickle', 'wb') as handle:
@@ -190,13 +194,20 @@ class ToxicComments:
     def toxic_comments_train_data(self):
         return self._toxic_comments_train_data
 
+    @property
+    def word_embeddings_model(self):
+        return self._word_embeddings_model
+
 class ToxicCommentsRNN:
+    def __init__(self, toxic_comments):
+        self._toxic_comments = toxic_comments
+
     # def reset_graph():
     #     if 'sess' in globals() and sess:
     #         sess.close()
     #     tf.reset_default_graph()
 
-    def build_rnn(vocab_size, state_size = 64, batch_size = 256, num_classes = 6):
+    def build_rnn(self, vocab_size, state_size = 64, batch_size = 256, num_classes = 6):
         # reset_graph()
 
         # Placeholders
@@ -206,16 +217,14 @@ class ToxicCommentsRNN:
         keep_prob = tf.constant(1.0)
 
         # Embedding layer
-        embeddings = tf.get_variable('embedding_matrix', [vocab_size, state_size])
+        embeddings = tf.get_variable('embedding_matrix', [self._toxic_comments.vocabulary_size, state_size])
         rnn_inputs = tf.nn.embedding_lookup(embeddings, x)
 
         # RNN
         cell = tf.nn.rnn_cell.GRUCell(state_size)
-        init_state = tf.get_variable('init_state', [1, state_size],
-                                     initializer=tf.constant_initializer(0.0))
+        init_state = tf.get_variable('init_state', [1, state_size], initializer=tf.constant_initializer(0.0))
         init_state = tf.tile(init_state, [batch_size, 1])
-        rnn_outputs, final_state = tf.nn.dynamic_rnn(cell, rnn_inputs, sequence_length=seqlen,
-                                                     initial_state=init_state)
+        rnn_outputs, final_state = tf.nn.dynamic_rnn(cell, rnn_inputs, sequence_length=seqlen, initial_state=init_state)
 
         # Add dropout, as the model otherwise quickly overfits
         rnn_outputs = tf.nn.dropout(rnn_outputs, keep_prob)
