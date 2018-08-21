@@ -79,7 +79,7 @@ class GloveModel:
                 self._token_to_embedding = pickle.load(handle)
         else:
             self.initialize()
-            file = open(glove_model_file_path, encoding="ISO-8859-1")
+            file = open(glove_model_file_path, encoding="utf-8")
             _, embedding = self.parse_line(self.peek_line(file))
             self.append_model("<UNK>", np.zeros(embedding.size, dtype=float))
             for line in file:
@@ -131,76 +131,67 @@ class GloveModel:
 
 
 class ToxicComments:
-    def __init__(self, word_embeddings_model):
+    def __init__(self, word_embeddings_model, id):
+        self._id = id
+        self._toxic_comments_pickle_file_path = '.\\toxic_comments_' + id + '.pickle'
         self._word_embeddings_model = word_embeddings_model
         self.initialize()
 
     def initialize(self):
-        self.size = 0
-        self.epochs = 0
-        self._toxic_comments_train_data = []
-        self._toxic_comments_test_data = []
+        self._epoch_size = 0
+        self._current_epoch = 0
+        self._current_batch = 0
+        self._toxic_comments = []
 
-    def load_toxic_comments(self, train_data_file_path, test_data_file_path):
+    def load_toxic_comments(self, toxic_comments_file_path):
         self.initialize()
-        self.load_toxic_comments_train_data(train_data_file_path)
-        self.load_toxic_comments_test_data(test_data_file_path)
-        self.size = len(self._toxic_comments_train_data)
+        self.load_toxic_comments_file(toxic_comments_file_path)
+        self._epoch_size = len(self._toxic_comments)
         self.shuffle()
 
-    def load_toxic_comments_train_data(self, train_data_file_path):
-        if os.path.exists('.\\toxic_comments_train_data.pickle'):
-            with open('.\\toxic_comments_train_data.pickle', 'rb') as handle:
-                self._toxic_comments_train_data = pickle.load(handle)
+    def load_toxic_comments_file(self, toxic_comments_file_path):
+        if os.path.exists(self._toxic_comments_pickle_file_path):
+            with open(self._toxic_comments_pickle_file_path, 'rb') as handle:
+                self._toxic_comments = pickle.load(handle)
         else:
-            with open(train_data_file_path, encoding="ISO-8859-1") as csv_file:
-                dict_reader = csv.DictReader(csv_file)
-                for csv_row in dict_reader:
-                    toxic_comment = ToxicComment(csv_row, self._word_embeddings_model)
-                    self._toxic_comments_train_data.append(toxic_comment)
-
-            with open('.\\toxic_comments_train_data.pickle', 'wb') as handle:
-                pickle.dump(self._toxic_comments_train_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-            return self._toxic_comments_train_data
-
-    def load_toxic_comments_test_data(self, test_data_file_path):
-        if os.path.exists('.\\toxic_comments_test_data.pickle'):
-            with open('.\\toxic_comments_test_data.pickle', 'rb') as handle:
-                self._toxic_comments_test_data = pickle.load(handle)
-        else:
-            with open(test_data_file_path, encoding="ISO-8859-1") as csv_file:
+            with open(toxic_comments_file_path, encoding="ISO-8859-1") as csv_file:
                 dict_reader = csv.DictReader(csv_file)
                 for csv_row in dict_reader:
                     if csv_row['toxic'] != '-1':
                         toxic_comment = ToxicComment(csv_row, self._word_embeddings_model)
-                        self._toxic_comments_test_data.append(toxic_comment)
+                        self._toxic_comments.append(toxic_comment)
 
-            with open('.\\toxic_comments_test_data.pickle', 'wb') as handle:
-                pickle.dump(self._toxic_comments_test_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open(self._toxic_comments_pickle_file_path, 'wb') as handle:
+                pickle.dump(self._toxic_comments, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-            return self._toxic_comments_test_data
+            return self._toxic_comments
 
     def shuffle(self):
-        random.shuffle(self._toxic_comments_train_data)
+        random.shuffle(self._toxic_comments)
         self.cursor = 0
 
     def get_next_batch(self, batch_size):
-        if self.cursor + batch_size - 1 > self.size:
-            self.epochs += 1
-            self.shuffle()
         start_range = self.cursor
         end_range = self.cursor + batch_size
         next_batch_indexed_tokens_tensor = self.get_next_batch_indexed_tokens(start_range, end_range, batch_size)
         next_batch_labels_tensor = self.get_next_batch_labels(start_range, end_range, batch_size)
         next_batch_sequence_length = self.get_next_batch_sequence_length(start_range, end_range, batch_size)
         self.cursor += batch_size
-        return next_batch_indexed_tokens_tensor, next_batch_labels_tensor, next_batch_sequence_length
+
+        self._current_batch = self._current_batch + 1
+        new_epoch = False
+        if self.cursor + batch_size > self._epoch_size:
+            self._current_epoch += 1
+            self._current_batch = 0
+            self.shuffle()
+            new_epoch = True
+
+        return next_batch_indexed_tokens_tensor, next_batch_labels_tensor, next_batch_sequence_length, new_epoch
 
     def get_next_batch_indexed_tokens(self, start_range, end_range, batch_size):
         indexed_tokens_list = []
         for index in range(start_range, end_range):
-            indexed_tokens_list.append(self._toxic_comments_train_data[index].indexed_tokens)
+            indexed_tokens_list.append(self._toxic_comments[index].indexed_tokens)
         indexed_tokens_lengths = [len(indexed_tokens) for indexed_tokens in indexed_tokens_list]
         max_length = max(indexed_tokens_lengths)
         next_batch_indexed_tokens_tensor = np.zeros([batch_size, max_length], dtype=np.int32)
@@ -211,42 +202,48 @@ class ToxicComments:
     def get_next_batch_labels(self, start_range, end_range, batch_size):
         next_batch_labels_tensor = np.zeros([batch_size, 6])
         for i in range(start_range, end_range):
-            next_batch_labels_tensor[i] = self._toxic_comments_train_data[i].labels
+            next_batch_labels_tensor[i - start_range] = self._toxic_comments[i].labels
         return next_batch_labels_tensor
 
     def get_next_batch_sequence_length(self, start_range, end_range, batch_size):
         next_batch_sequence_length_tensor = np.zeros([batch_size])
         for i in range(start_range, end_range):
-            next_batch_sequence_length_tensor[i] = len(self._toxic_comments_train_data[i].indexed_tokens)
+            next_batch_sequence_length_tensor[i - start_range] = len(self._toxic_comments[i].indexed_tokens)
         return next_batch_sequence_length_tensor
 
     @property
-    def toxic_comments_train_data(self):
-        return self._toxic_comments_train_data
-
-    @property
-    def toxic_comments_test_data(self):
-        return self._toxic_comments_test_data
+    def toxic_comments(self):
+        return self._toxic_comments
 
     @property
     def word_embeddings_model(self):
         return self._word_embeddings_model
 
+    @property
+    def current_epoch(self):
+        return self._current_epoch
+
+    @property
+    def current_batch(self):
+        return self._current_batch
+
 
 class ToxicCommentsRNN:
-    def __init__(self, toxic_comments, state_size, batch_size):
-        self._toxic_comments = toxic_comments
+    def __init__(self, toxic_comments_train, toxic_comments_test, state_size, batch_size, epochs):
+        self._toxic_comments_train = toxic_comments_train
+        self._toxic_comments_test = toxic_comments_test
         self._state_size = state_size
         self._batch_size = batch_size
+        self._epochs = epochs
 
     def build_graph(self):
         tf.reset_default_graph()
-        vocabulary_size = self._toxic_comments.word_embeddings_model.vocabulary_size
-        embedding_dimension = self._toxic_comments.word_embeddings_model.embedding_dimension
+        vocabulary_size = self._toxic_comments_train.word_embeddings_model.vocabulary_size
+        embedding_dimension = self._toxic_comments_train.word_embeddings_model.embedding_dimension
         embeddings_shape = [vocabulary_size, embedding_dimension]
 
         # Constants
-        self._keep_prob = tf.constant(1.0)
+        self._keep_prob = tf.placeholder(tf.float32, [])
 
         # Placeholders
         self._x = tf.placeholder(tf.int32, [self._batch_size, None])  # [batch_size, num_steps]
@@ -267,27 +264,36 @@ class ToxicCommentsRNN:
         self._init_state = tf.tile(self._init_state, [self._batch_size, 1])
         self._rnn_outputs, self._final_state = tf.nn.dynamic_rnn(self._cell, self._rnn_inputs, sequence_length=self._sequence_length, initial_state=self._init_state)
 
+        # Add dropout, as the model otherwise quickly overfits
+        self._rnn_outputs = tf.nn.dropout(self._rnn_outputs, self._keep_prob)
+
         # Get last RNN output
         batch_range = tf.range(self._batch_size)
         indices = tf.stack([batch_range, self._sequence_length - 1], axis=1)
         self._last_rnn_output = tf.gather_nd(self._rnn_outputs, indices)
 
-
+        # Calculate logits and predications
         W = tf.get_variable('W_output', [self._state_size, 6])
         b = tf.get_variable('b_output', [6], initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(self._last_rnn_output, W) + b
-        preds = tf.nn.softmax(logits)
+        preds = tf.nn.sigmoid(logits)
 
+        # Calculate accuracy
         correct = tf.equal(tf.cast(preds > 0.5, tf.int32), self._y)
-        accuracy = tf.reduce_mean(tf.cast(correct, tf.float32))
+        self._accuracy = tf.reduce_mean(tf.cast(correct, tf.float32))
 
-        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._y))
-        train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
+        # Setup loss functions and optimizer
+        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=tf.cast(self._y, tf.float32)))
+        self._optimizer = tf.train.AdamOptimizer(1e-4).minimize(loss)
 
     def train_graph(self):
-        with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
 
+        # with tf.Session() as sess:
+        #     sess.run(tf.global_variables_initializer())
+            # feed_dict = {
+            #     self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings
+            # }
+            # sess.run(self._embeddings_init, feed_dict=feed_dict)
 
             # indexed_tokens, labels, sequence_length = self._toxic_comments.get_next_batch(64)
             # feed_dict = {
@@ -302,33 +308,53 @@ class ToxicCommentsRNN:
             # bla2 = sess.run(self._rnn_outputs, feed_dict=feed_dict)
             # bla3 = sess.run(self._last_rnn_output, feed_dict=feed_dict)
 
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
             step, accuracy = 0, 0
-            tr_losses, te_losses = [], []
-            current_epoch = 0
-            while current_epoch < num_epochs:
+            train_accuracy, test_accuracy = [], []
+            while self._toxic_comments_train.current_epoch < self._epochs:
+                print("Epoch:           ", self._toxic_comments_train.current_epoch)
+                print("Batch:           ", self._toxic_comments_train.current_batch)
+                indexed_tokens, labels, sequence_length, new_epoch_train = self._toxic_comments_train.get_next_batch(self._batch_size)
+                feed_dict = {
+                    self._x: indexed_tokens,
+                    self._sequence_length: sequence_length,
+                    self._y: labels,
+                    self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings,
+                    self._keep_prob: 0.3
+                }
+                current_accuracy, _ = sess.run([self._accuracy, self._optimizer], feed_dict=feed_dict)
+                accuracy += current_accuracy
                 step += 1
-                batch = tr.next_batch(batch_size)
-                feed = {g['x']: batch[0], g['y']: batch[1], g['seqlen']: batch[2], g['dropout']: 0.6}
-                accuracy_, _ = sess.run([g['accuracy'], g['ts']], feed_dict=feed)
-                accuracy += accuracy_
+                print("Accuracy:        ", "{0:.2%}".format(current_accuracy))
+                print("Avg. Accuracy:   ", "{0:.2%}".format(accuracy / step))
+                print("---------------------------------------------")
 
-                if tr.epochs > current_epoch:
-                    current_epoch += 1
-                    tr_losses.append(accuracy / step)
+                if new_epoch_train:
+                    print("Epoch", self._toxic_comments_train.current_epoch, "done.")
+                    train_accuracy.append(accuracy / step)
                     step, accuracy = 0, 0
 
-                    # eval test set
-                    te_epoch = te.epochs
-                    while te.epochs == te_epoch:
+                    while True:
+                        indexed_tokens, labels, sequence_length, new_epoch_test = self._toxic_comments_test.get_next_batch(self._batch_size)
+                        feed_dict = {
+                            self._x: indexed_tokens,
+                            self._sequence_length: sequence_length,
+                            self._y: labels,
+                            self._keep_prob: 1.0,
+                            self._embeddings_placeholder: self._toxic_comments_test.word_embeddings_model.embeddings
+                        }
+                        current_accuracy = sess.run(self._accuracy, feed_dict=feed_dict)
+                        accuracy += current_accuracy
                         step += 1
-                        batch = te.next_batch(batch_size)
-                        feed = {g['x']: batch[0], g['y']: batch[1], g['seqlen']: batch[2]}
-                        accuracy_ = sess.run([g['accuracy']], feed_dict=feed)[0]
-                        accuracy += accuracy_
 
-                    te_losses.append(accuracy / step)
+                        if new_epoch_test:
+                            break
+
+                    test_accuracy.append(accuracy / step)
                     step, accuracy = 0, 0
-                    print("Accuracy after epoch", current_epoch, " - tr:", tr_losses[-1], "- te:", te_losses[-1])
+                    print("Test accuracy:", "{0:.2%}".format(test_accuracy[-1]))
+                    print("---------------------------------------------")
 
 
 

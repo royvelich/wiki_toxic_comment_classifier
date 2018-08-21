@@ -5,9 +5,12 @@ import tensorflow as tf
 glove_model = toxic_comments_classifier.GloveModel()
 glove_model.load_glove_model('.\\glove.6B\\glove.6B.50d.txt')
 
-toxic_comments = toxic_comments_classifier.ToxicComments(glove_model)
-toxic_comments.load_toxic_comments('.\\all\\train.csv', '.\\all\\test_merged.csv')
+toxic_comments_train = toxic_comments_classifier.ToxicComments(glove_model, 'train')
+toxic_comments_train.load_toxic_comments('.\\all\\train.csv')
 
-toxic_comments_rnn = toxic_comments_classifier.ToxicCommentsRNN(toxic_comments=toxic_comments, state_size=64, batch_size=64)
+toxic_comments_test = toxic_comments_classifier.ToxicComments(glove_model, 'test')
+toxic_comments_test.load_toxic_comments('.\\all\\test_merged.csv')
+
+toxic_comments_rnn = toxic_comments_classifier.ToxicCommentsRNN(toxic_comments_train=toxic_comments_train, toxic_comments_test=toxic_comments_test, state_size=96, batch_size=128, epochs=10)
 toxic_comments_rnn.build_graph()
 toxic_comments_rnn.train_graph()
