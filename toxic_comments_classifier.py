@@ -243,7 +243,7 @@ class ToxicCommentsRNN:
         embeddings_shape = [vocabulary_size, embedding_dimension]
 
         # Constants
-        self._keep_prob = tf.placeholder(tf.float32, [])
+        self._keep_prob = tf.placeholder_with_default(1.0, shape=())
 
         # Placeholders
         self._x = tf.placeholder(tf.int32, [self._batch_size, None])  # [batch_size, num_steps]
@@ -259,28 +259,42 @@ class ToxicCommentsRNN:
         self._rnn_inputs = tf.nn.embedding_lookup(self._embeddings_variable, self._x)
 
         # RNN
-        self._cell = tf.nn.rnn_cell.GRUCell(self._state_size)
-        self._init_state = tf.get_variable('init_state', [1, self._state_size], initializer=tf.constant_initializer(0.0))
-        self._init_state = tf.tile(self._init_state, [self._batch_size, 1])
-        self._rnn_outputs, self._final_state = tf.nn.dynamic_rnn(self._cell, self._rnn_inputs, sequence_length=self._sequence_length, initial_state=self._init_state)
+        self._forward_cell = tf.nn.rnn_cell.GRUCell(self._state_size)
+        self._backward_cell = tf.nn.rnn_cell.GRUCell(self._state_size)
+
+        self._init_state_forward = tf.get_variable('init_state_forward', [1, self._state_size], initializer=tf.constant_initializer(0.0))
+        self._init_state_forward = tf.tile(self._init_state_forward, [self._batch_size, 1])
+
+        self._init_state_backward = tf.get_variable('init_state_backward', [1, self._state_size], initializer=tf.constant_initializer(0.0))
+        self._init_state_backward = tf.tile(self._init_state_backward, [self._batch_size, 1])
+
+        self._rnn_outputs, self._final_states = tf.nn.bidirectional_dynamic_rnn(cell_fw=self._forward_cell, cell_bw=self._backward_cell, inputs=self._rnn_inputs, sequence_length=self._sequence_length, initial_state_fw=self._init_state_forward, initial_state_bw=self._init_state_backward)
+
+        self._rnn_output_forward = self._rnn_outputs[0]
+        self._rnn_output_backward = self._rnn_outputs[1]
 
         # Add dropout, as the model otherwise quickly overfits
-        self._rnn_outputs = tf.nn.dropout(self._rnn_outputs, self._keep_prob)
+        self._rnn_output_forward = tf.nn.dropout(self._rnn_output_forward, self._keep_prob)
+        self._rnn_output_backward = tf.nn.dropout(self._rnn_output_backward, self._keep_prob)
 
         # Get last RNN output
         batch_range = tf.range(self._batch_size)
         indices = tf.stack([batch_range, self._sequence_length - 1], axis=1)
-        self._last_rnn_output = tf.gather_nd(self._rnn_outputs, indices)
+        self._last_rnn_output_forward = tf.gather_nd(self._rnn_output_forward, indices)
+        self._last_rnn_output_backward = tf.gather_nd(self._rnn_output_backward, indices)
 
-        # Calculate logits and predications
-        W = tf.get_variable('W_output', [self._state_size, 6])
+        # Calculate logits and predictions
+        W_forward = tf.get_variable('W_output_forward', [self._state_size, 6])
+        W_backward = tf.get_variable('W_output_backward', [self._state_size, 6])
         b = tf.get_variable('b_output', [6], initializer=tf.constant_initializer(0.0))
-        logits = tf.matmul(self._last_rnn_output, W) + b
-        preds = tf.nn.sigmoid(logits)
+        logits = tf.matmul(self._last_rnn_output_forward, W_forward) + tf.matmul(self._last_rnn_output_backward, W_backward) + b
+        self._preds = tf.nn.sigmoid(logits)
 
         # Calculate accuracy
-        correct = tf.equal(tf.cast(preds > 0.5, tf.int32), self._y)
-        self._accuracy = tf.reduce_mean(tf.cast(correct, tf.float32))
+        self._yoyo = self._preds > 0.5
+        self._threshold_preds = tf.cast(self._preds > 0.5, tf.int32)
+        self._correct = tf.reduce_all(tf.equal(self._threshold_preds, self._y), 1)
+        self._accuracy = tf.reduce_mean(tf.cast(self._correct, tf.float32))
 
         # Setup loss functions and optimizer
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=tf.cast(self._y, tf.float32)))
@@ -290,28 +304,30 @@ class ToxicCommentsRNN:
 
         # with tf.Session() as sess:
         #     sess.run(tf.global_variables_initializer())
-            # feed_dict = {
-            #     self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings
-            # }
-            # sess.run(self._embeddings_init, feed_dict=feed_dict)
-
-            # indexed_tokens, labels, sequence_length = self._toxic_comments.get_next_batch(64)
-            # feed_dict = {
-            #     self._x: indexed_tokens,
-            #     self._sequence_length: sequence_length,
-            #     self._y: labels,
-            #     self._embeddings_placeholder: self._toxic_comments.word_embeddings_model.embeddings
-            # }
-            #
-            # sess.run(self._embeddings_init, feed_dict=feed_dict)
-            # bla = sess.run(self._rnn_inputs, feed_dict=feed_dict)
-            # bla2 = sess.run(self._rnn_outputs, feed_dict=feed_dict)
-            # bla3 = sess.run(self._last_rnn_output, feed_dict=feed_dict)
+        #     feed_dict = {
+        #         self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings
+        #     }
+        #     sess.run(self._embeddings_init, feed_dict=feed_dict)
+        #
+        #     indexed_tokens, labels, sequence_length, new_epoch = self._toxic_comments_train.get_next_batch(self._batch_size)
+        #     feed_dict = {
+        #         self._x: indexed_tokens,
+        #         self._sequence_length: sequence_length,
+        #         self._y: labels,
+        #         # self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings
+        #     }
+        #
+        #     bla = sess.run(self._rnn_inputs, feed_dict=feed_dict)
+        #     bla2 = sess.run(self._rnn_outputs, feed_dict=feed_dict)
+        #     bla3 = sess.run(self._rnn_output_forward, feed_dict=feed_dict)
+        #     bla4 = sess.run(self._rnn_output_backward, feed_dict=feed_dict)
+        #
+        #     y = 6
 
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
             step, accuracy = 0, 0
-            train_accuracy, test_accuracy = [], []
+            train_accuracy, test_accuracy, threshold_preds = [], [], []
             while self._toxic_comments_train.current_epoch < self._epochs:
                 print("Epoch:           ", self._toxic_comments_train.current_epoch)
                 print("Batch:           ", self._toxic_comments_train.current_batch)
@@ -323,6 +339,17 @@ class ToxicCommentsRNN:
                     self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings,
                     self._keep_prob: 0.3
                 }
+                # preds, threshold_preds, yoyo, correct, y = sess.run([self._preds, self._threshold_preds, self._yoyo, self._correct, self._y], feed_dict=feed_dict)
+                # print("------------------ YOYO: ------------------")
+                # print(yoyo)
+                # print("------------------ PREDS: ------------------")
+                # print(preds)
+                # print("------------- THRESHOLD PREDS: -------------")
+                # print(threshold_preds)
+                # print("------------- Y: -------------")
+                # print(y)
+                # print("----------------- CORRECT: -----------------")
+                # print(correct)
                 current_accuracy, _ = sess.run([self._accuracy, self._optimizer], feed_dict=feed_dict)
                 accuracy += current_accuracy
                 step += 1
@@ -341,9 +368,10 @@ class ToxicCommentsRNN:
                             self._x: indexed_tokens,
                             self._sequence_length: sequence_length,
                             self._y: labels,
-                            self._keep_prob: 1.0,
                             self._embeddings_placeholder: self._toxic_comments_test.word_embeddings_model.embeddings
                         }
+                        current_threshold_preds = sess.run(self._threshold_preds, feed_dict=feed_dict)
+                        threshold_preds.append(current_threshold_preds)
                         current_accuracy = sess.run(self._accuracy, feed_dict=feed_dict)
                         accuracy += current_accuracy
                         step += 1

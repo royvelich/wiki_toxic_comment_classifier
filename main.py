@@ -11,6 +11,6 @@ toxic_comments_train.load_toxic_comments('.\\all\\train.csv')
 toxic_comments_test = toxic_comments_classifier.ToxicComments(glove_model, 'test')
 toxic_comments_test.load_toxic_comments('.\\all\\test_merged.csv')
 
-toxic_comments_rnn = toxic_comments_classifier.ToxicCommentsRNN(toxic_comments_train=toxic_comments_train, toxic_comments_test=toxic_comments_test, state_size=96, batch_size=128, epochs=10)
+toxic_comments_rnn = toxic_comments_classifier.ToxicCommentsRNN(toxic_comments_train=toxic_comments_train, toxic_comments_test=toxic_comments_test, state_size=256, batch_size=32, epochs=10)
 toxic_comments_rnn.build_graph()
 toxic_comments_rnn.train_graph()
