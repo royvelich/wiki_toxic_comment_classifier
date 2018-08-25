@@ -245,6 +245,12 @@ class ToxicCommentsRNN:
         self._batch_size = batch_size
         self._epochs = epochs
 
+    def length(self, sequence):
+        used = tf.sign(tf.reduce_max(tf.abs(sequence), reduction_indices=2))
+        length = tf.reduce_sum(used, reduction_indices=1)
+        length = tf.cast(length, tf.int32)
+        return length
+
     def build_graph(self):
         tf.reset_default_graph()
         vocabulary_size = self._toxic_comments_train.word_embeddings_model.vocabulary_size
@@ -255,7 +261,7 @@ class ToxicCommentsRNN:
         self._keep_prob = tf.placeholder_with_default(1.0, shape=())
 
         # Placeholders
-        self._x = tf.placeholder(tf.int32, [self._batch_size, 50])  # [batch_size, num_steps]
+        self._x = tf.placeholder(tf.int32, [self._batch_size, 80])  # [batch_size, num_steps]
         self._sequence_length = tf.placeholder(tf.int32, [self._batch_size])
         self._y = tf.placeholder(tf.int32, [self._batch_size, 6])
         self._embeddings_placeholder = tf.placeholder(tf.float32, embeddings_shape)
@@ -282,64 +288,37 @@ class ToxicCommentsRNN:
         # self._init_state_backward = tf.tile(self._init_state_backward, [self._batch_size, 1])
 
         _init_state_forward = self._forward_cell.zero_state(self._batch_size, dtype=tf.float32)
-        _init_state_backward = self._forward_cell.zero_state(self._batch_size, dtype=tf.float32)
-        self._rnn_outputs, self._final_states = tf.nn.bidirectional_dynamic_rnn(cell_fw=self._forward_cell, cell_bw=self._backward_cell, inputs=self._rnn_inputs, sequence_length=self._sequence_length, initial_state_fw=_init_state_forward, initial_state_bw=_init_state_backward)
-
-
+        _init_state_backward = self._backward_cell.zero_state(self._batch_size, dtype=tf.float32)
+        self._seq_len = self.length(self._rnn_inputs)
+        self._rnn_outputs, self._final_states = tf.nn.bidirectional_dynamic_rnn(cell_fw=self._forward_cell, cell_bw=self._backward_cell, inputs=self._rnn_inputs, sequence_length=self._seq_len, initial_state_fw=_init_state_forward, initial_state_bw=_init_state_backward)
         # self._rnn_outputs, self._final_states = tf.nn.dynamic_rnn(cell=self._forward_cell, inputs=self._rnn_inputs, sequence_length=self._sequence_length, initial_state=initial_state)
-
 
         self._rnn_output_forward = self._rnn_outputs[0]
         self._rnn_output_backward = self._rnn_outputs[1]
 
-        # shape_forward = tf.shape(self._rnn_output_forward)
-        # shape_backward = tf.shape(self._rnn_output_backward)
-
-
-        # self._rnn_output_forward_max_pool = tf.reduce_max(self._rnn_output_forward, 2)
-
         # self._rnn_output_forward_max_pool = tf.reduce_max(self._rnn_output_forward, 2)
         # self._rnn_output_backward_max_pool = tf.reduce_max(self._rnn_output_backward, 2)
-        # self._rnn_output_concatenated = tf.concat([self._rnn_output_forward, self._rnn_output_backward], 1)
-
-        # self._rnn_output_forward_flatten = tf.reshape(self._rnn_output_forward, [shape_forward[0]*shape_forward[1], shape_forward[2]])
-        # self._rnn_output_backward_flatten = tf.reshape(self._rnn_output_backward, [shape_backward[0] * shape_backward[1], shape_backward[2]])
-
-        # self._rnn_output_concatenated = tf.concat([self._rnn_output_forward_flatten , self._rnn_output_backward_flatten], 0)
-        # self._rnn_output_concatenated_max_pool = tf.reduce_max(self._rnn_output_concatenated, axis=[1])
-
-        # self._myshape = tf.shape(self._rnn_output_concatenated_max_pool)
-        # self._rnn_output_concatenated_max_pool = tf.reshape(self._rnn_output_concatenated_max_pool, [self._myshape[0], 1])
-
-        # Add dropout, as the model otherwise quickly overfits
-
-        # self._rnn_output_forward = tf.nn.dropout(self._rnn_output_forward, self._keep_prob)
-        # self._rnn_output_backward = tf.nn.dropout(self._rnn_output_backward, self._keep_prob)
+        # self._rnn_output_concatenated = tf.concat([self._rnn_output_forward_max_pool, self._rnn_output_backward_max_pool], 1)
+        #
+        # self._flatten = tf.contrib.layers.flatten(self._rnn_output_concatenated)
+        # self._fc1 = tf.contrib.layers.fully_connected(inputs=self._flatten, num_outputs=60)
+        # self._fc1_dropout = tf.contrib.layers.dropout(inputs=self._fc1, is_training=self._is_training)
+        # self._fc2 = tf.contrib.layers.fully_connected(inputs=self._fc1_dropout, num_outputs=60)
+        # self._logits = tf.contrib.layers.fully_connected(inputs=self._fc2, num_outputs=6)
 
         # Get last RNN output
-
         batch_range = tf.range(self._batch_size)
-        indices = tf.stack([batch_range, self._sequence_length - 1], axis=1)
+        indices = tf.stack([batch_range, self._seq_len - 1], axis=1)
         self._last_rnn_output_forward = tf.gather_nd(self._rnn_output_forward, indices)
         self._last_rnn_output_backward = tf.gather_nd(self._rnn_output_backward, indices)
 
         # Calculate logits and predictions
         W_forward = tf.get_variable('W_output_forward', [self._state_size, 6])
         W_backward = tf.get_variable('W_output_backward', [self._state_size, 6])
-        b = tf.get_variable('b_output', [6], initializer=tf.constant_initializer(0.0))
+        b = tf.get_variable('b_output', [6], initializer=tf.truncated_normal_initializer())
         self._logits = tf.matmul(self._last_rnn_output_forward, W_forward) + tf.matmul(self._last_rnn_output_backward, W_backward) + b
 
-        # self._flatten = tf.contrib.layers.flatten(self._rnn_output_concatenated)
-        # self._fc1 = tf.contrib.layers.fully_connected(inputs=tf.contrib.layers.flatten(self._rnn_output_concatenated), num_outputs=100)
-        # self._logits = tf.contrib.layers.fully_connected(inputs=self._fc1, num_outputs=6)
-        # self._fc3 = tf.contrib.layers.fully_connected(inputs=self._fc2, num_outputs=50)
-        # self._logits = tf.contrib.layers.fully_connected(inputs=self._fc3, num_outputs=6)
-        # self._fc1_dropout = tf.contrib.layers.dropout(inputs=self._fc1, is_training=self._is_training)
-        # self._fc5 = tf.contrib.layers.fully_connected(inputs=self._fc4, num_outputs=300)
-        # self._fc6 = tf.contrib.layers.fully_connected(inputs=self._fc5, num_outputs=100)
-        # self._fc3 = tf.contrib.layers.fully_connected(inputs=self._fc2, num_outputs=50)
-        # self._fc4 = tf.contrib.layers.fully_connected(inputs=self._fc3, num_outputs=25)
-        # self._fc3_dropout = tf.contrib.layers.dropout(inputs=self._fc3, is_training=self._is_training)
+
 
         self._preds = tf.nn.sigmoid(self._logits)
 
@@ -350,8 +329,8 @@ class ToxicCommentsRNN:
         self._accuracy = tf.reduce_mean(tf.cast(self._correct, tf.float32))
 
         # Setup loss functions and optimizer
-        self._loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self._logits, labels=tf.cast(self._y, tf.float32)))
-        self._optimizer = tf.train.AdamOptimizer(1e-2).minimize(self._loss)
+        self._loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self._logits, labels=tf.cast(self._y, tf.float32)))
+        self._optimizer = tf.train.AdamOptimizer(1e-1).minimize(self._loss)
 
     def train_graph(self):
 
@@ -408,22 +387,27 @@ class ToxicCommentsRNN:
                     self._sequence_length: sequence_length,
                     self._y: labels,
                     self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings,
-                    self._keep_prob: 0.5,
+                    self._keep_prob: 0.4,
                     self._is_training: True
                 }
-                loss, logits, x, inputs, seq = sess.run([self._loss, self._logits, self._x, self._rnn_inputs, self._sequence_length], feed_dict=feed_dict)
+                # preds, inputs, seq = sess.run([self._threshold_int_preds, self._rnn_inputs, self._seq_len], feed_dict=feed_dict)
                 # print("------------------ threshold_int_preds: ------------------")
                 # print(threshold_int_preds)
                 # print("------------------ y: ------------------")
                 # print(y)
                 # print("------------- correct: -------------")
-                # print(seq)
-                current_accuracy, loss, _ = sess.run([self._accuracy, self._loss, self._optimizer], feed_dict=feed_dict)
-                print(loss)
+                # print(outputs)
+                # print(preds)
+                current_accuracy, loss, preds, y, _ = sess.run([self._accuracy, self._loss, self._threshold_int_preds, self._y, self._optimizer], feed_dict=feed_dict)
+
+                bla = np.concatenate((y, preds), axis=1)
+                np.savetxt("foo.csv", bla, fmt='%i', delimiter=",", header="y1, y2, y3, y4, y5, y6, preds1, preds2, preds3, preds4, preds5, preds6")
+
                 accuracy += current_accuracy
                 step += 1
                 print("Accuracy:        ", "{0:.2%}".format(current_accuracy))
                 print("Avg. Accuracy:   ", "{0:.2%}".format(accuracy / step))
+                print("Loss:            ", loss)
                 print("---------------------------------------------")
 
                 if new_epoch_train:
@@ -445,8 +429,8 @@ class ToxicCommentsRNN:
                             self._embeddings_placeholder: self._toxic_comments_test.word_embeddings_model.embeddings,
                             self._is_training: False
                         }
-                        current_threshold_preds = sess.run(self._threshold_preds, feed_dict=feed_dict)
-                        threshold_preds.append(current_threshold_preds)
+                        # current_threshold_preds = sess.run(self._threshold_preds, feed_dict=feed_dict)
+                        # threshold_preds.append(current_threshold_preds)
                         current_accuracy = sess.run(self._accuracy, feed_dict=feed_dict)
                         accuracy += current_accuracy
                         step += 1
