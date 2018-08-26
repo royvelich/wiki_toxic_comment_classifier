@@ -18,43 +18,6 @@ nltk.download('stopwords')
 nltk.download('wordnet')
 
 
-
-#settings
-eng_stopwords = set(stopwords.words("english"))
-lem = WordNetLemmatizer()
-tokenizer=TweetTokenizer()
-
-APPOS = { "aren't" : "are not", "can't" : "cannot", "couldn't" : "could not", "didn't" : "did not", "doesn't" : "does not", "don't" : "do not", "hadn't" : "had not", "hasn't" : "has not", "haven't" : "have not", "he'd" : "he would", "he'll" : "he will", "he's" : "he is", "i'd" : "I would", "i'd" : "I had", "i'll" : "I will", "i'm" : "I am", "isn't" : "is not", "it's" : "it is", "it'll":"it will", "i've" : "I have", "let's" : "let us", "mightn't" : "might not", "mustn't" : "must not", "shan't" : "shall not", "she'd" : "she would", "she'll" : "she will", "she's" : "she is", "shouldn't" : "should not", "that's" : "that is", "there's" : "there is", "they'd" : "they would", "they'll" : "they will", "they're" : "they are", "they've" : "they have", "we'd" : "we would", "we're" : "we are", "weren't" : "were not", "we've" : "we have", "what'll" : "what will", "what're" : "what are", "what's" : "what is", "what've" : "what have", "where's" : "where is", "who'd" : "who would", "who'll" : "who will", "who're" : "who are", "who's" : "who is", "who've" : "who have", "won't" : "will not", "wouldn't" : "would not", "you'd" : "you would", "you'll" : "you will", "you're" : "you are", "you've" : "you have", "'re": " are","wasn't": "was not", "we'll":" will", "didn't": "did not"
-}
-
-def clean(comment):
-    comment = comment.lower()
-    # remove new line character
-    comment=re.sub('\\n',' ',comment)
-    # remove ip addresses
-    comment=re.sub('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', '', comment)
-    # remove usernames
-    comment=re.sub('\[\[.*\]', '', comment)
-    # split the comment into words
-    words = tokenizer.tokenize(comment)
-    # replace that's to that is by looking up the dictionary
-    words=[APPOS[word] if word in APPOS else word for word in words]
-    # replace variation of a word with its base form
-    words=[lem.lemmatize(word, "v") for word in words]
-    # eliminate stop words
-    words = [w for w in words if not w in eng_stopwords]
-    # now we will have only one string containing all the words
-    clean_comment=" ".join(words)
-    # remove all non alphabetical characters
-    clean_comment=re.sub("\W+"," ",clean_comment)
-    clean_comment=re.sub("  "," ",clean_comment)
-    return (clean_comment)
-
-
-
-
-
-
 class TokenEmbedding:
     def __init__(self, embedding, index):
         self._embedding = embedding
@@ -70,8 +33,52 @@ class TokenEmbedding:
 
 
 class ToxicComment:
+    _eng_stopwords = set(stopwords.words("english"))
+    _lemmatizer = WordNetLemmatizer()
+    _tokenizer = TweetTokenizer()
+    _appos = {"aren't": "are not", "can't": "cannot", "couldn't": "could not", "didn't": "did not",
+             "doesn't": "does not", "don't": "do not", "hadn't": "had not", "hasn't": "has not", "haven't": "have not",
+             "he'd": "he would", "he'll": "he will", "he's": "he is", "i'd": "I would", "i'd": "I had",
+             "i'll": "I will", "i'm": "I am", "isn't": "is not", "it's": "it is", "it'll": "it will", "i've": "I have",
+             "let's": "let us", "mightn't": "might not", "mustn't": "must not", "shan't": "shall not",
+             "she'd": "she would", "she'll": "she will", "she's": "she is", "shouldn't": "should not",
+             "that's": "that is", "there's": "there is", "they'd": "they would", "they'll": "they will",
+             "they're": "they are", "they've": "they have", "we'd": "we would", "we're": "we are",
+             "weren't": "were not", "we've": "we have", "what'll": "what will", "what're": "what are",
+             "what's": "what is", "what've": "what have", "where's": "where is", "who'd": "who would",
+             "who'll": "who will", "who're": "who are", "who's": "who is", "who've": "who have", "won't": "will not",
+             "wouldn't": "would not", "you'd": "you would", "you'll": "you will", "you're": "you are",
+             "you've": "you have", "'re": " are", "wasn't": "was not", "we'll": " will", "didn't": "did not"}
+
+    @staticmethod
+    def _clean(comment):
+        # make all characters lower cased
+        comment = comment.lower()
+        # remove new line character
+        comment = re.sub('\\n', ' ', comment)
+        # remove ip addresses
+        comment = re.sub('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', '', comment)
+        # remove usernames
+        comment = re.sub('\[\[.*\]', '', comment)
+        # split the comment into words
+        words = ToxicComment._tokenizer.tokenize(comment)
+        # replace that's to that is by looking up the dictionary
+        words = [ToxicComment._appos[word] if word in ToxicComment._appos else word for word in words]
+        # replace variation of a word with its base form
+        words = [ToxicComment._lemmatizer.lemmatize(word, "v") for word in words]
+        # eliminate stop words
+        words = [w for w in words if not w in ToxicComment._eng_stopwords]
+        # now we will have only one string containing all the words
+        clean_comment = " ".join(words)
+        # remove all non alphabetical characters
+        clean_comment = re.sub("\W+", " ", clean_comment)
+        clean_comment = re.sub("  ", " ", clean_comment)
+        return clean_comment
+
     def __init__(self, csv_row, glove_model, comment_max_length):
-        self._tokens = word_tokenize(clean(csv_row['comment_text']))
+        self._id = csv_row['id']
+        self._comment_text = csv_row['comment_text']
+        self._tokens = word_tokenize(ToxicComment._clean(csv_row['comment_text']))
         self._labels = np.array([float(csv_row['toxic']), float(csv_row['severe_toxic']), float(csv_row['obscene']), float(csv_row['threat']), float(csv_row['insult']), float(csv_row['identity_hate'])])
         self._indexed_tokens = np.zeros(shape=[comment_max_length], dtype=np.int32)
         self._token_count = min(len(self._tokens), comment_max_length)
@@ -100,6 +107,14 @@ class ToxicComment:
     @property
     def token_count(self):
         return self._token_count
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def comment_text(self):
+        return self._comment_text
 
 
 class GloveModel:
@@ -227,9 +242,9 @@ class ToxicComments:
     def get_next_batch(self, batch_size):
         start_range = self.cursor
         end_range = self.cursor + batch_size
-        next_batch_indexed_tokens_tensor = self.get_next_batch_indexed_tokens(start_range, end_range, batch_size)
-        next_batch_labels_tensor = self.get_next_batch_labels(start_range, end_range, batch_size)
-        next_batch_sequence_length = self.get_next_batch_sequence_length(start_range, end_range, batch_size)
+        next_batch = self.get_next_batch_comments(start_range, end_range, batch_size)
+        next_batch_indexed_tokens = self.get_next_batch_indexed_tokens(start_range, end_range, batch_size)
+        next_batch_labels = self.get_next_batch_labels(start_range, end_range, batch_size)
         self.cursor += batch_size
 
         self._current_batch = self._current_batch + 1
@@ -240,7 +255,7 @@ class ToxicComments:
             self.shuffle()
             new_epoch = True
 
-        return next_batch_indexed_tokens_tensor, next_batch_labels_tensor, next_batch_sequence_length, new_epoch
+        return next_batch, next_batch_indexed_tokens, next_batch_labels, new_epoch
 
     def get_next_batch_indexed_tokens(self, start_range, end_range, batch_size):
         indexed_tokens_list = []
@@ -259,11 +274,11 @@ class ToxicComments:
             next_batch_labels_tensor[i - start_range] = self._toxic_comments[i].labels
         return next_batch_labels_tensor
 
-    def get_next_batch_sequence_length(self, start_range, end_range, batch_size):
-        next_batch_sequence_length_tensor = np.zeros([batch_size])
+    def get_next_batch_comments(self, start_range, end_range, batch_size):
+        next_batch = []
         for i in range(start_range, end_range):
-            next_batch_sequence_length_tensor[i - start_range] = self._toxic_comments[i].token_count
-        return next_batch_sequence_length_tensor
+            next_batch.append(self._toxic_comments[i])
+        return next_batch
 
     @property
     def toxic_comments(self):
@@ -281,40 +296,116 @@ class ToxicComments:
     def current_batch(self):
         return self._current_batch
 
+    @property
+    def id(self):
+        return self._id
+
 
 class ToxicCommentsRNN:
-    def __init__(self, toxic_comments_train, toxic_comments_test, state_size, batch_size, epochs):
-        self._toxic_comments_train = toxic_comments_train
-        self._toxic_comments_test = toxic_comments_test
+    def __init__(self, glove_model_file_path, toxic_comments_train_file_path, toxic_comments_test_file_path, toxic_comment_max_length, state_size, batch_size, epochs):
+        self._glove_model = GloveModel()
+        self._glove_model.load_glove_model(glove_model_file_path)
+        self._toxic_comments_train = ToxicComments(self._glove_model, 'train', toxic_comment_max_length)
+        self._toxic_comments_train.load_toxic_comments(toxic_comments_train_file_path)
+        self._toxic_comments_test = ToxicComments(self._glove_model, 'test', toxic_comment_max_length)
+        self._toxic_comments_test.load_toxic_comments(toxic_comments_test_file_path)
+        self._toxic_comment_max_length = toxic_comment_max_length
         self._state_size = state_size
         self._batch_size = batch_size
         self._epochs = epochs
+        self._train_stats = []
+        self._test_stats = []
+        self._test_results = []
+        self._best_test_results = []
+        self._max_auc = 0
 
-    def length(self, sequence):
-        used = tf.sign(tf.reduce_max(tf.abs(sequence), reduction_indices=2))
-        length = tf.reduce_sum(used, reduction_indices=1)
-        length = tf.cast(length, tf.int32)
-        return length
+    def _reset_global_variables(self):
+        self._sess.run(tf.global_variables_initializer())
+
+    def _reset_local_variables(self):
+        self._sess.run(tf.local_variables_initializer())
+        feed_dict = {
+            self._embeddings_placeholder: self._glove_model.embeddings
+        }
+        self._sess.run(self._embeddings_init, feed_dict=feed_dict)
+
+    def _optimize(self, feed_dict):
+        self._sess.run([self._optimizer], feed_dict=feed_dict)
+
+    def _run_update_ops(self, feed_dict):
+        self._sess.run([self._update_op_loss_mean, self._update_op_accuracy, self._update_op_column_0, self._update_op_column_1, self._update_op_column_2, self._update_op_column_3, self._update_op_column_4, self._update_op_column_5], feed_dict=feed_dict)
+
+    def _get_batch_results(self, feed_dict):
+         return self._sess.run([self._accuracy, self._loss_mean, self._threshold_int_preds, self._y, self._auc], feed_dict=feed_dict)
+
+    @staticmethod
+    def _get_batch_toxic_correctness(preds, y):
+        zero_indices = np.where(~y.any(axis=1))[0]
+        y_non_zero = np.delete(y, zero_indices, axis=0)
+        preds_non_zero = np.delete(preds, zero_indices, axis=0)
+        correct_non_zero_pred = np.equal(y_non_zero, preds_non_zero).all(axis=1)
+        correct_non_zero_preds_count = correct_non_zero_pred.shape[0]
+        return np.sum(correct_non_zero_pred) / correct_non_zero_preds_count
+
+    def _get_next_batch(self, toxic_comments):
+        toxic_comments_batch, indexed_tokens, labels, new_epoch = toxic_comments.get_next_batch(self._batch_size)
+        feed_dict = {
+            self._x: indexed_tokens,
+            self._y: labels,
+            self._keep_prob: 0.5,
+            self._is_training: True if toxic_comments.id is 'train' else False
+        }
+        return feed_dict, new_epoch, toxic_comments_batch
+
+    def _run_batch(self, toxic_comments):
+        print("{:<30}".format(" ".join([toxic_comments.id.capitalize(), "Epoch:"])), toxic_comments.current_epoch)
+        print("{:<30}".format("Batch:"), toxic_comments.current_batch)
+        is_training = True if toxic_comments.id is 'train' else False
+        feed_dict, new_epoch, toxic_comments_batch = self._get_next_batch(toxic_comments=toxic_comments)
+        if toxic_comments.id is 'train':
+            self._optimize(feed_dict=feed_dict)
+        self._run_update_ops(feed_dict=feed_dict)
+        accuracy, loss, preds, y, auc = self._get_batch_results(feed_dict=feed_dict)
+        toxic_correctness = ToxicCommentsRNN._get_batch_toxic_correctness(preds=preds, y=y)
+        print("{:<30}".format("Accuracy:"), "{0:.2%}".format(accuracy))
+        print("{:<30}".format("Toxic Correctness:"), "{0:.4%}".format(toxic_correctness))
+        print("{:<30}".format("Loss:"), loss)
+        print("{:<30}".format("Mean Column-Wise ROC AUC:"), auc)
+        print("---------------------------------------------")
+
+        if not is_training:
+            for i, toxic_comment in enumerate(toxic_comments_batch):
+                self._test_results.append([toxic_comment.id] + [toxic_comment.comment_text] + y[i].tolist() + preds[i].tolist())
+
+        if new_epoch:
+            _new_stats = [toxic_comments.current_epoch - 1, accuracy, loss, auc, toxic_correctness]
+            if is_training:
+                self._train_stats.append(_new_stats)
+            else:
+                self._test_stats.append(_new_stats)
+                if auc > self._max_auc:
+                    saver = tf.train.Saver()
+                    saver.save(self._sess, ".\\model.ckpt")
+                    self._best_test_results = self._test_results
+                self._test_results = []
+
+        return new_epoch
 
     def build_graph(self):
         tf.reset_default_graph()
-        vocabulary_size = self._toxic_comments_train.word_embeddings_model.vocabulary_size
-        embedding_dimension = self._toxic_comments_train.word_embeddings_model.embedding_dimension
+        vocabulary_size = self._glove_model.vocabulary_size
+        embedding_dimension = self._glove_model.embedding_dimension
         embeddings_shape = [vocabulary_size, embedding_dimension]
 
         # Constants
         self._keep_prob = tf.placeholder_with_default(1.0, shape=())
 
         # Placeholders
-        self._x = tf.placeholder(tf.int32, [self._batch_size, 100])  # [batch_size, num_steps]
+        self._x = tf.placeholder(tf.int32, [self._batch_size, self._toxic_comment_max_length])
         self._sequence_length = tf.placeholder(tf.int32, [self._batch_size])
         self._y = tf.placeholder(tf.int32, [self._batch_size, 6])
         self._embeddings_placeholder = tf.placeholder(tf.float32, embeddings_shape)
         self._is_training = tf.placeholder(tf.bool)
-        self._first_iteration = tf.placeholder(tf.bool)
-
-        self._previous_concatenated_preds = tf.placeholder(tf.float32, [None, 6])
-        self._previous_concatenated_y = tf.placeholder(tf.int32, [None, 6])
 
         # Embeddings layer
         self._embeddings_variable = tf.Variable(tf.constant(0.0, shape=embeddings_shape), trainable=False, name="embeddings")
@@ -330,18 +421,14 @@ class ToxicCommentsRNN:
         self._backward_cell = tf.nn.rnn_cell.GRUCell(self._state_size)
         self._backward_cell = tf.contrib.rnn.DropoutWrapper(self._backward_cell, output_keep_prob=self._keep_prob)
 
-        # self._init_state_forward = tf.get_variable('init_state_forward', [1, self._state_size], initializer=tf.constant_initializer(0.0))
-        # self._init_state_forward = tf.tile(self._init_state_forward, [self._batch_size, 1])
-        #
-        # self._init_state_backward = tf.get_variable('init_state_backward', [1, self._state_size], initializer=tf.constant_initializer(0.0))
-        # self._init_state_backward = tf.tile(self._init_state_backward, [self._batch_size, 1])
-
         _init_state_forward = self._forward_cell.zero_state(self._batch_size, dtype=tf.float32)
         _init_state_backward = self._backward_cell.zero_state(self._batch_size, dtype=tf.float32)
-        self._seq_len = self.length(self._rnn_inputs)
-        self._rnn_outputs, self._final_states = tf.nn.bidirectional_dynamic_rnn(cell_fw=self._forward_cell, cell_bw=self._backward_cell, inputs=self._rnn_inputs, sequence_length=self._seq_len, initial_state_fw=_init_state_forward, initial_state_bw=_init_state_backward)
-        # self._rnn_outputs, self._final_states = tf.nn.dynamic_rnn(cell=self._forward_cell, inputs=self._rnn_inputs, sequence_length=self._sequence_length, initial_state=initial_state)
 
+        used = tf.sign(tf.reduce_max(tf.abs(self._rnn_inputs), reduction_indices=2))
+        length = tf.reduce_sum(used, reduction_indices=1)
+        self._sequence_length = tf.cast(length, tf.int32)
+
+        self._rnn_outputs, self._final_states = tf.nn.bidirectional_dynamic_rnn(cell_fw=self._forward_cell, cell_bw=self._backward_cell, inputs=self._rnn_inputs, sequence_length=self._sequence_length, initial_state_fw=_init_state_forward, initial_state_bw=_init_state_backward)
         self._rnn_output_forward = self._rnn_outputs[0]
         self._rnn_output_backward = self._rnn_outputs[1]
         #
@@ -350,10 +437,10 @@ class ToxicCommentsRNN:
         # self._rnn_output_concatenated = tf.concat([self._rnn_output_forward_max_pool, self._rnn_output_backward_max_pool], 1)
 
         # Get last RNN output
-        batch_range = tf.range(self._batch_size)
-        indices = tf.stack([batch_range, self._seq_len - 1], axis=1)
-        self._last_rnn_output_forward = tf.gather_nd(self._rnn_output_forward, indices)
-        self._last_rnn_output_backward = tf.gather_nd(self._rnn_output_backward, indices)
+        # batch_range = tf.range(self._batch_size)
+        # indices = tf.stack([batch_range, self._seq_len - 1], axis=1)
+        # self._last_rnn_output_forward = tf.gather_nd(self._rnn_output_forward, indices)
+        # self._last_rnn_output_backward = tf.gather_nd(self._rnn_output_backward, indices)
 
         shape = [self._rnn_output_forward.shape[0], self._rnn_output_forward.shape[1] * self._rnn_output_forward.shape[2]]
         self._rnn_output_concatenated = tf.concat([tf.reshape(self._rnn_output_forward, shape), tf.reshape(self._rnn_output_backward, shape)], axis=1)
@@ -363,243 +450,68 @@ class ToxicCommentsRNN:
         self._fc2_dropout = tf.contrib.layers.dropout(inputs=self._fc2, is_training=self._is_training, keep_prob=0.5)
         self._logits = tf.contrib.layers.fully_connected(inputs=self._fc2_dropout, num_outputs=6, activation_fn=None)
 
-
         # Get last RNN output
         # batch_range = tf.range(self._batch_size)
         # indices = tf.stack([batch_range, self._seq_len - 1], axis=1)
         # self._last_rnn_output_forward = tf.gather_nd(self._rnn_output_forward, indices)
         # self._last_rnn_output_backward = tf.gather_nd(self._rnn_output_backward, indices)
 
-        # Calculate logits and predictions
-        # self._concat_states = tf.concat([self._final_states[0], self._final_states[1]], 1)
-        #
-        # W_1 = tf.get_variable('W_1', [2*self._state_size, 30])
-        # b_1 = tf.get_variable('b_1', [30], initializer=tf.truncated_normal_initializer())
-        #
-        # self._out1 = tf.nn.relu(tf.matmul(self._concat_states, W_1) + b_1)
-        #
-        # W_2 = tf.get_variable('W_2', [30, 20])
-        # b_2 = tf.get_variable('b_2', [20], initializer=tf.truncated_normal_initializer())
-        #
-        # self._out2 = tf.nn.relu(tf.matmul(self._out1, W_2) + b_2)
-        #
-        # W_3 = tf.get_variable('W_3', [20, 6])
-        # b_3 = tf.get_variable('b_3', [6], initializer=tf.truncated_normal_initializer())
-        #
-        # self._logits = tf.matmul(self._out2, W_3) + b_3
-
         self._preds = tf.nn.sigmoid(self._logits)
 
-        def concatenated_preds_f1(): return self._preds
-        def concatenated_preds_f2(): return tf.concat([self._previous_concatenated_preds, self._preds], axis=0)
-        self._concatenated_preds = tf.cond(self._first_iteration, concatenated_preds_f1, concatenated_preds_f2)
+        # Split preds and labels (y) by columns
+        self._preds_column_0 = tf.slice(self._preds, [0, 0], [self._batch_size, 1])
+        self._preds_column_1 = tf.slice(self._preds, [0, 1], [self._batch_size, 1])
+        self._preds_column_2 = tf.slice(self._preds, [0, 2], [self._batch_size, 1])
+        self._preds_column_3 = tf.slice(self._preds, [0, 3], [self._batch_size, 1])
+        self._preds_column_4 = tf.slice(self._preds, [0, 4], [self._batch_size, 1])
+        self._preds_column_5 = tf.slice(self._preds, [0, 5], [self._batch_size, 1])
 
-        def concatenated_y_f1(): return self._y
-        def concatenated_y_f2(): return tf.concat([self._previous_concatenated_y, self._y], axis=0)
-        self._concatenated_y = tf.cond(self._first_iteration, concatenated_y_f1, concatenated_y_f2)
+        self._y_column_0 = tf.slice(self._y, [0, 0], [self._batch_size, 1])
+        self._y_column_1 = tf.slice(self._y, [0, 1], [self._batch_size, 1])
+        self._y_column_2 = tf.slice(self._y, [0, 2], [self._batch_size, 1])
+        self._y_column_3 = tf.slice(self._y, [0, 3], [self._batch_size, 1])
+        self._y_column_4 = tf.slice(self._y, [0, 4], [self._batch_size, 1])
+        self._y_column_5 = tf.slice(self._y, [0, 5], [self._batch_size, 1])
 
-        self._preds_column_0 = tf.slice(self._concatenated_preds, [0, 0], [self._batch_size, 1])
-        self._preds_column_1 = tf.slice(self._concatenated_preds, [0, 1], [self._batch_size, 1])
-        self._preds_column_2 = tf.slice(self._concatenated_preds, [0, 2], [self._batch_size, 1])
-        self._preds_column_3 = tf.slice(self._concatenated_preds, [0, 3], [self._batch_size, 1])
-        self._preds_column_4 = tf.slice(self._concatenated_preds, [0, 4], [self._batch_size, 1])
-        self._preds_column_5 = tf.slice(self._concatenated_preds, [0, 5], [self._batch_size, 1])
-
-        self._y_column_0 = tf.slice(self._concatenated_y, [0, 0], [self._batch_size, 1])
-        self._y_column_1 = tf.slice(self._concatenated_y, [0, 1], [self._batch_size, 1])
-        self._y_column_2 = tf.slice(self._concatenated_y, [0, 2], [self._batch_size, 1])
-        self._y_column_3 = tf.slice(self._concatenated_y, [0, 3], [self._batch_size, 1])
-        self._y_column_4 = tf.slice(self._concatenated_y, [0, 4], [self._batch_size, 1])
-        self._y_column_5 = tf.slice(self._concatenated_y, [0, 5], [self._batch_size, 1])
-
-        # self._concatenated_preds = tf.concat([self._previous_concatenated_preds, self._preds], axis=0)
-        # self._concatenated_y = tf.concat([self._previous_concatenated_y, self._y], axis=0)
-
-        # self._concatenated_y = tf.cond(self._first_batch, lambda: self._concatenated_y.assign(self._y), lambda: tf.concat([self._concatenated_y, self._y], axis=0))
-
-        # Calculate accuracy
+        # Calculate accuracy and mean column-wise AUC
         self._threshold_preds = self._preds > 0.5
         self._threshold_int_preds = tf.cast(self._threshold_preds, tf.int32)
         self._correct = tf.reduce_all(tf.equal(self._threshold_int_preds, self._y), 1)
-        self._accuracy = tf.reduce_mean(tf.cast(self._correct, tf.float32))
-
-
-        # _, self._auc = tf.metrics.auc(labels=self._y, predictions=self._preds, curve="ROC", name="auc")
-        _, self._auc_column_0 = tf.metrics.auc(labels=self._y_column_0, predictions=self._preds_column_0)
-        _, self._auc_column_1 = tf.metrics.auc(labels=self._y_column_1, predictions=self._preds_column_1)
-        _, self._auc_column_2 = tf.metrics.auc(labels=self._y_column_2, predictions=self._preds_column_2)
-        _, self._auc_column_3 = tf.metrics.auc(labels=self._y_column_3, predictions=self._preds_column_3)
-        _, self._auc_column_4 = tf.metrics.auc(labels=self._y_column_4, predictions=self._preds_column_4)
-        _, self._auc_column_5 = tf.metrics.auc(labels=self._y_column_5, predictions=self._preds_column_5)
+        self._accuracy, self._update_op_accuracy = tf.metrics.mean(tf.cast(self._correct, tf.float32))
+        self._auc_column_0, self._update_op_column_0 = tf.metrics.auc(labels=self._y_column_0, predictions=self._preds_column_0)
+        self._auc_column_1, self._update_op_column_1 = tf.metrics.auc(labels=self._y_column_1, predictions=self._preds_column_1)
+        self._auc_column_2, self._update_op_column_2 = tf.metrics.auc(labels=self._y_column_2, predictions=self._preds_column_2)
+        self._auc_column_3, self._update_op_column_3 = tf.metrics.auc(labels=self._y_column_3, predictions=self._preds_column_3)
+        self._auc_column_4, self._update_op_column_4 = tf.metrics.auc(labels=self._y_column_4, predictions=self._preds_column_4)
+        self._auc_column_5, self._update_op_column_5 = tf.metrics.auc(labels=self._y_column_5, predictions=self._preds_column_5)
         self._auc_concat = tf.stack([self._auc_column_0, self._auc_column_1, self._auc_column_2, self._auc_column_3, self._auc_column_4, self._auc_column_5], axis=0);
         self._auc = tf.reduce_mean(self._auc_concat)
 
         # Setup loss functions and optimizer
-        self._loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self._logits, labels=tf.cast(self._y, tf.float32)))
+        self._sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=self._logits, labels=tf.cast(self._y, tf.float32))
+        self._loss_mean, self._update_op_loss_mean = tf.metrics.mean(self._sigmoid_cross_entropy)
+        self._loss = tf.reduce_mean(self._sigmoid_cross_entropy)
         self._optimizer = tf.train.AdamOptimizer(1e-3).minimize(self._loss)
 
     def train_graph(self):
-
-        # with tf.Session() as sess:
-        #     sess.run(tf.global_variables_initializer())
-        #     feed_dict = {
-        #         self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings
-        #     }
-        #     sess.run(self._embeddings_init, feed_dict=feed_dict)
-        #
-        #     indexed_tokens, labels, sequence_length, new_epoch = self._toxic_comments_train.get_next_batch(self._batch_size)
-        #     feed_dict = {
-        #         self._x: indexed_tokens,
-        #         self._sequence_length: sequence_length,
-        #         self._y: labels,
-        #         self._is_training: True
-        #         # self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings
-        #     }
-        #
-        #     bla = sess.run(self._rnn_inputs, feed_dict=feed_dict)
-        #     bla2 = sess.run(self._rnn_outputs, feed_dict=feed_dict)
-        #     bla3 = sess.run(self._rnn_output_forward, feed_dict=feed_dict)
-        #     bla4 = sess.run(self._rnn_output_backward, feed_dict=feed_dict)
-        #
-        #     # bla5 = sess.run(self._rnn_output_forward_flatten, feed_dict=feed_dict)
-        #     #
-        #     # bla6 = sess.run(self._rnn_output_concatenated, feed_dict=feed_dict)
-        #     # bla7 = sess.run(self._rnn_output_concatenated_max_pool, feed_dict=feed_dict)
-        #
-        #
-        #     # bla8 = sess.run(self._fc1, feed_dict=feed_dict)
-        #
-        #     bla9 = sess.run(self._logits, feed_dict=feed_dict)
-        #
-        #     y = 6
-        first_train_batch = True
-
-        with tf.Session() as sess:
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-            step, accuracy = 0, 0
-            train_accuracy, test_accuracy, threshold_preds = [], [], []
+        with tf.Session() as self._sess:
+            self._reset_global_variables()
+            self._reset_local_variables()
             while self._toxic_comments_train.current_epoch < self._epochs:
-                print("Epoch:                  ", self._toxic_comments_train.current_epoch)
-                print("Batch:                  ", self._toxic_comments_train.current_batch)
-
-                feed_dict = {
-                    self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings
-                }
-                sess.run(self._embeddings_init, feed_dict=feed_dict)
-
-
-                indexed_tokens, labels, sequence_length, new_epoch_train = self._toxic_comments_train.get_next_batch(self._batch_size)
-
-                if first_train_batch is True:
-                    self._previous_concatenated_preds_feed = [[0, 0, 0, 0, 0, 0]]
-                    self._previous_concatenated_y_feed = [[0, 0, 0, 0, 0, 0]]
-
-                feed_dict = {
-                    self._x: indexed_tokens,
-                    self._sequence_length: sequence_length,
-                    self._y: labels,
-                    self._embeddings_placeholder: self._toxic_comments_train.word_embeddings_model.embeddings,
-                    self._keep_prob: 0.5,
-                    self._is_training: True,
-                    self._first_iteration: first_train_batch,
-                    self._previous_concatenated_preds: self._previous_concatenated_preds_feed,
-                    self._previous_concatenated_y: self._previous_concatenated_y_feed
-                }
-
-                if first_train_batch is True:
-                    first_train_batch = False
-                # preds, inputs, seq = sess.run([self._threshold_int_preds, self._rnn_inputs, self._seq_len], feed_dict=feed_dict)
-                # print("------------------ threshold_int_preds: ------------------")
-                # print(threshold_int_preds)
-                # print("------------------ y: ------------------")
-                # print(y)
-                # print("------------- correct: -------------")
-                # print(outputs)
-                # print(preds)
-                current_accuracy, loss, preds, y, auc, self._previous_concatenated_preds_feed, self._previous_concatenated_y_feed, column_0, _ = sess.run([self._accuracy, self._loss, self._threshold_int_preds, self._y, self._auc, self._concatenated_preds, self._concatenated_y, self._preds_column_0, self._optimizer], feed_dict=feed_dict)
-
-                print(self._previous_concatenated_preds_feed.shape)
-                print(self._previous_concatenated_y_feed.shape)
-
-
-                zero_indices = np.where(~y.any(axis=1))[0]
-                y_non_zero = np.delete(y, zero_indices, axis=0)
-                preds_non_zero = np.delete(preds, zero_indices, axis=0)
-                corrent_non_zero_pred = np.equal(y_non_zero, preds_non_zero).all(axis=1)
-                non_zero_preds_count = corrent_non_zero_pred.shape[0]
-                non_trivial_correctness = np.sum(corrent_non_zero_pred) / non_zero_preds_count
-
-                bla = np.concatenate((y, preds), axis=1)
-                np.savetxt("foo.csv", bla, fmt='%i', delimiter=",", header="y1, y2, y3, y4, y5, y6, preds1, preds2, preds3, preds4, preds5, preds6")
-
-                accuracy += current_accuracy
-                step += 1
-                print("Accuracy:               ", "{0:.2%}".format(current_accuracy))
-                print("Avg. Accuracy:          ", "{0:.2%}".format(accuracy / step))
-                print("Non-Trivial Correctness:", "{0:.4%}".format(non_trivial_correctness))
-                print("Loss:                   ", loss)
-                print("AUC:                    ", auc)
-                print("---------------------------------------------")
-
-                if new_epoch_train:
-                    first_train_batch = True
-                    first_test_batch = True
-                    print("Epoch", self._toxic_comments_train.current_epoch, "done.")
-                    train_accuracy.append(accuracy / step)
-                    step, accuracy = 0, 0
+                new_epoch = self._run_batch(toxic_comments=self._toxic_comments_train)
+                if new_epoch:
+                    self._reset_local_variables()
                     while True:
-                        feed_dict = {
-                            self._embeddings_placeholder: self._toxic_comments_test.word_embeddings_model.embeddings
-                        }
-                        sess.run(self._embeddings_init, feed_dict=feed_dict)
-
-                        if first_test_batch is True:
-                            self._previous_concatenated_preds_feed = [[0, 0, 0, 0, 0, 0]]
-                            self._previous_concatenated_y_feed = [[0, 0, 0, 0, 0, 0]]
-
-                        indexed_tokens, labels, sequence_length, new_epoch_test = self._toxic_comments_test.get_next_batch(self._batch_size)
-                        feed_dict = {
-                            self._x: indexed_tokens,
-                            self._sequence_length: sequence_length,
-                            self._y: labels,
-                            self._embeddings_placeholder: self._toxic_comments_test.word_embeddings_model.embeddings,
-                            self._is_training: False,
-                            self._first_iteration: first_test_batch,
-                            self._previous_concatenated_preds: self._previous_concatenated_preds_feed,
-                            self._previous_concatenated_y: self._previous_concatenated_y_feed
-
-                        }
-                        current_accuracy, loss, preds, y,  self._previous_concatenated_preds_feed, self._previous_concatenated_y_feed, auc = sess.run([self._accuracy, self._loss, self._threshold_int_preds, self._y, self._concatenated_preds, self._concatenated_y, self._auc], feed_dict=feed_dict)
-                        accuracy += current_accuracy
-                        step += 1
-
-                        print(self._previous_concatenated_preds_feed.shape)
-                        print(self._previous_concatenated_y_feed.shape)
-
-                        if first_test_batch is True:
-                            first_test_batch = False
-
-                        zero_indices = np.where(~y.any(axis=1))[0]
-                        y_non_zero = np.delete(y, zero_indices, axis=0)
-                        preds_non_zero = np.delete(preds, zero_indices, axis=0)
-                        corrent_non_zero_pred = np.equal(y_non_zero, preds_non_zero).all(axis=1)
-                        non_zero_preds_count = corrent_non_zero_pred.shape[0]
-                        non_trivial_correctness = np.sum(corrent_non_zero_pred) / non_zero_preds_count
-
-                        bla = np.concatenate((y, preds), axis=1)
-                        np.savetxt("foo_test.csv", bla, fmt='%i', delimiter=",", header="y1, y2, y3, y4, y5, y6, preds1, preds2, preds3, preds4, preds5, preds6")
-
-                        print("Accuracy:               ", "{0:.2%}".format(current_accuracy))
-                        print("Avg. Accuracy:          ", "{0:.2%}".format(accuracy / step))
-                        print("Non-Trivial Correctness:", "{0:.4%}".format(non_trivial_correctness))
-                        print("Loss:                   ", loss)
-                        print("AUC:                    ", auc)
-                        print("---------------------------------------------")
-
-                        if new_epoch_test:
+                        new_epoch = self._run_batch(toxic_comments=self._toxic_comments_test)
+                        if new_epoch:
                             break
+                    self._reset_local_variables()
+        header = "epoch, accuracy, loss, auc, toxic_correctness"
+        np.savetxt("train_stats.csv", np.array(self._train_stats), delimiter=",", header=header, comments='')
+        np.savetxt("test_stats.csv", np.array(self._test_stats), delimiter=",", header=header, comments='')
 
-                    test_accuracy.append(accuracy / step)
-                    step, accuracy = 0, 0
-                    print("Test accuracy:", "{0:.2%}".format(test_accuracy[-1]))
-                    print("---------------------------------------------")
+        with open(".\\best_test_results.csv", 'w', encoding="ISO-8859-1") as myfile:
+            writer = csv.writer(myfile, lineterminator='\n')
+            writer.writerow(["id", "comment_text", "toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate", "toxic_preds", "severe_toxic_preds", "obscene_preds", "threat_preds", "insult_preds", "identity_hate_preds"])
+            writer.writerows(self._best_test_results)
+        # np.savetxt("best_test_results.csv", np.array(self._best_test_results), delimiter=",", header="id,comment_text,toxic,severe_toxic,obscene,threat,insult,identity_hate,toxic_preds,severe_toxic_preds,obscene_preds,threat_preds,insult_preds,identity_hate_preds", comments='')
