@@ -8,6 +8,8 @@ import tensorflow as tf
 from nltk.tokenize import word_tokenize
 import pandas as pd
 import re
+import os
+from shutil import copyfile
 import string
 from nltk.stem.wordnet import WordNetLemmatizer
 from nltk.corpus import stopwords
@@ -236,7 +238,8 @@ class ToxicComments:
             return self._toxic_comments
 
     def shuffle(self):
-        random.shuffle(self._toxic_comments)
+        if self._id is 'train':
+            random.shuffle(self._toxic_comments)
         self.cursor = 0
 
     def get_next_batch(self, batch_size):
@@ -302,7 +305,31 @@ class ToxicComments:
 
 
 class ToxicCommentsRNN:
-    def __init__(self, glove_model_file_path, toxic_comments_train_file_path, toxic_comments_test_file_path, toxic_comment_max_length, state_size, batch_size, epochs):
+    def __init__(
+            self,
+            glove_model_file_path,
+            toxic_comments_train_file_path,
+            toxic_comments_test_file_path,
+            toxic_comment_max_length,
+            state_size,
+            batch_size,
+            epochs,
+            learning_rate,
+            fc_layer1_size,
+            fc_layer2_size,
+            fc_layer1_dropout,
+            fc_layer2_dropout,
+            rnn_dropout):
+        self._results_root_directory = ".\\Results"
+        if not os.path.exists(self._results_root_directory):
+            os.makedirs(self._results_root_directory)
+        immidiate_subdirectories = ToxicCommentsRNN._get_immediate_subdirectories(self._results_root_directory)
+        if not immidiate_subdirectories:
+            self._current_results_id = 1
+        else:
+            self._current_results_id = max(map(int, immidiate_subdirectories)) + 1
+        last_directory_name = str(self._current_results_id)
+        self._results_directory = os.path.join(self._results_root_directory, last_directory_name)
         self._glove_model = GloveModel()
         self._glove_model.load_glove_model(glove_model_file_path)
         self._toxic_comments_train = ToxicComments(self._glove_model, 'train', toxic_comment_max_length)
@@ -319,6 +346,12 @@ class ToxicCommentsRNN:
         self._best_test_results = []
         self._max_auc = 0
         self._toxic_correctness_sum = 0
+        self._learning_rate = learning_rate
+        self._fc_layer1_size = fc_layer1_size
+        self._fc_layer2_size = fc_layer2_size
+        self._fc_layer1_dropout = fc_layer1_dropout
+        self._fc_layer2_dropout = fc_layer2_dropout
+        self._rnn_dropout = rnn_dropout
 
     def _reset_global_variables(self):
         self._sess.run(tf.global_variables_initializer())
@@ -353,10 +386,15 @@ class ToxicCommentsRNN:
         feed_dict = {
             self._x: indexed_tokens,
             self._y: labels,
-            self._keep_prob: 0.5,
+            self._keep_prob: self._rnn_dropout if toxic_comments.id is 'train' else 1.0,
             self._is_training: True if toxic_comments.id is 'train' else False
         }
         return feed_dict, new_epoch, toxic_comments_batch
+
+    @staticmethod
+    def _get_immediate_subdirectories(directory_path):
+        return [name for name in os.listdir(directory_path)
+                if os.path.isdir(os.path.join(directory_path, name))]
 
     def _run_batch(self, toxic_comments):
         print("{:<30}".format(" ".join([toxic_comments.id.capitalize(), "Epoch:"])), toxic_comments.current_epoch)
@@ -389,8 +427,26 @@ class ToxicCommentsRNN:
                 self._test_stats.append(_new_stats)
                 if auc > self._max_auc:
                     saver = tf.train.Saver()
-                    saver.save(self._sess, ".\\model.ckpt")
+                    saver.save(self._sess, os.path.join(self._results_directory, "model.ckpt"))
                     self._best_test_results = self._test_results
+                    self._max_auc = auc
+
+                    should_rewrite_best_result = True
+                    best_results_file_path = os.path.join(self._results_root_directory, "best_results.csv")
+                    if os.path.exists(best_results_file_path):
+                        with open(best_results_file_path, encoding="ISO-8859-1") as csv_file:
+                            dict_reader = csv.DictReader(csv_file)
+                            for csv_row in dict_reader:
+                                last_best_auc = float(csv_row["auc"])
+                                if auc < last_best_auc:
+                                    should_rewrite_best_result = False
+
+                    if should_rewrite_best_result:
+                        with open(best_results_file_path, 'w', encoding="ISO-8859-1") as myfile:
+                            writer = csv.writer(myfile, lineterminator='\n')
+                            writer.writerow(["id", "auc"])
+                            writer.writerow([self._current_results_id, auc])
+
                 self._test_results = []
 
             self._toxic_correctness_sum = 0
@@ -420,24 +476,28 @@ class ToxicCommentsRNN:
         # RNN Inputs
         self._rnn_inputs = tf.nn.embedding_lookup(self._embeddings_variable, self._x)
 
-        # RNN
+        # RNN forward cell
         self._forward_cell = tf.nn.rnn_cell.GRUCell(self._state_size)
         self._forward_cell = tf.contrib.rnn.DropoutWrapper(self._forward_cell, output_keep_prob=self._keep_prob)
 
+        # RNN backward cell
         self._backward_cell = tf.nn.rnn_cell.GRUCell(self._state_size)
         self._backward_cell = tf.contrib.rnn.DropoutWrapper(self._backward_cell, output_keep_prob=self._keep_prob)
 
+        # RNN cells initial state
         _init_state_forward = self._forward_cell.zero_state(self._batch_size, dtype=tf.float32)
         _init_state_backward = self._backward_cell.zero_state(self._batch_size, dtype=tf.float32)
 
+        # Calculate sequence length for our inputs (text comments have variable length)
         used = tf.sign(tf.reduce_max(tf.abs(self._rnn_inputs), reduction_indices=2))
         length = tf.reduce_sum(used, reduction_indices=1)
         self._sequence_length = tf.cast(length, tf.int32)
 
+        # Build bi-directional RNN and extract forward and backward outputs
         self._rnn_outputs, self._final_states = tf.nn.bidirectional_dynamic_rnn(cell_fw=self._forward_cell, cell_bw=self._backward_cell, inputs=self._rnn_inputs, sequence_length=self._sequence_length, initial_state_fw=_init_state_forward, initial_state_bw=_init_state_backward)
         self._rnn_output_forward = self._rnn_outputs[0]
         self._rnn_output_backward = self._rnn_outputs[1]
-        #
+
         # self._rnn_output_forward_max_pool = tf.reduce_max(self._rnn_output_forward, 2)
         # self._rnn_output_backward_max_pool = tf.reduce_max(self._rnn_output_backward, 2)
         # self._rnn_output_concatenated = tf.concat([self._rnn_output_forward_max_pool, self._rnn_output_backward_max_pool], 1)
@@ -450,18 +510,13 @@ class ToxicCommentsRNN:
 
         shape = [self._rnn_output_forward.shape[0], self._rnn_output_forward.shape[1] * self._rnn_output_forward.shape[2]]
         self._rnn_output_concatenated = tf.concat([tf.reshape(self._rnn_output_forward, shape), tf.reshape(self._rnn_output_backward, shape)], axis=1)
-        self._fc1 = tf.contrib.layers.fully_connected(inputs=self._rnn_output_concatenated, num_outputs=200)
-        self._fc1_dropout = tf.contrib.layers.dropout(inputs=self._fc1, is_training=self._is_training, keep_prob=0.5)
-        self._fc2 = tf.contrib.layers.fully_connected(inputs=self._fc1_dropout, num_outputs=50)
-        self._fc2_dropout = tf.contrib.layers.dropout(inputs=self._fc2, is_training=self._is_training, keep_prob=0.5)
+        self._fc1 = tf.contrib.layers.fully_connected(inputs=self._rnn_output_concatenated, num_outputs=self._fc_layer1_size)
+        self._fc1_dropout = tf.contrib.layers.dropout(inputs=self._fc1, is_training=self._is_training, keep_prob=self._fc_layer1_dropout)
+        self._fc2 = tf.contrib.layers.fully_connected(inputs=self._fc1_dropout, num_outputs=self._fc_layer2_size)
+        self._fc2_dropout = tf.contrib.layers.dropout(inputs=self._fc2, is_training=self._is_training, keep_prob=self._fc_layer2_dropout)
         self._logits = tf.contrib.layers.fully_connected(inputs=self._fc2_dropout, num_outputs=6, activation_fn=None)
 
-        # Get last RNN output
-        # batch_range = tf.range(self._batch_size)
-        # indices = tf.stack([batch_range, self._seq_len - 1], axis=1)
-        # self._last_rnn_output_forward = tf.gather_nd(self._rnn_output_forward, indices)
-        # self._last_rnn_output_backward = tf.gather_nd(self._rnn_output_backward, indices)
-
+        # Apply sigmoid on logits to get predictions
         self._preds = tf.nn.sigmoid(self._logits)
 
         # Split preds and labels (y) by columns
@@ -497,7 +552,7 @@ class ToxicCommentsRNN:
         self._sigmoid_cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=self._logits, labels=tf.cast(self._y, tf.float32))
         self._loss_mean, self._update_op_loss_mean = tf.metrics.mean(self._sigmoid_cross_entropy)
         self._loss = tf.reduce_mean(self._sigmoid_cross_entropy)
-        self._optimizer = tf.train.AdamOptimizer(1e-3).minimize(self._loss)
+        self._optimizer = tf.train.AdamOptimizer(self._learning_rate).minimize(self._loss)
 
     def train_graph(self):
         with tf.Session() as self._sess:
@@ -512,12 +567,26 @@ class ToxicCommentsRNN:
                         if new_epoch:
                             break
                     self._reset_local_variables()
-        header = "epoch, accuracy, loss, auc, toxic_correctness"
-        np.savetxt("train_stats.csv", np.array(self._train_stats), delimiter=",", header=header, comments='')
-        np.savetxt("test_stats.csv", np.array(self._test_stats), delimiter=",", header=header, comments='')
 
-        with open(".\\best_test_results.csv", 'w', encoding="ISO-8859-1") as myfile:
+        header = "epoch, accuracy, loss, auc, toxic_correctness"
+        np.savetxt(os.path.join(self._results_directory, "train_stats.csv"), np.array(self._train_stats), delimiter=",", header=header, comments='')
+        np.savetxt(os.path.join(self._results_directory, "test_stats.csv"), np.array(self._test_stats), delimiter=",", header=header, comments='')
+
+        with open(os.path.join(self._results_directory, "best_test_results.csv"), 'w', encoding="ISO-8859-1") as myfile:
             writer = csv.writer(myfile, lineterminator='\n')
             writer.writerow(["id", "comment_text", "toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate", "toxic_preds", "severe_toxic_preds", "obscene_preds", "threat_preds", "insult_preds", "identity_hate_preds"])
             writer.writerows(self._best_test_results)
-        # np.savetxt("best_test_results.csv", np.array(self._best_test_results), delimiter=",", header="id,comment_text,toxic,severe_toxic,obscene,threat,insult,identity_hate,toxic_preds,severe_toxic_preds,obscene_preds,threat_preds,insult_preds,identity_hate_preds", comments='')
+
+        copyfile(os.path.join(".", "main.py"), os.path.join(self._results_directory, "main.py"))
+        copyfile(os.path.join(".", "toxic_comments_classifier.py"), os.path.join(self._results_directory, "toxic_comments_classifier.py"))
+
+    def test_graph(self, model_file_path):
+        with tf.Session() as self._sess:
+            self._reset_global_variables()
+            self._reset_local_variables()
+            saver = tf.train.Saver()
+            saver.restore(self._sess, model_file_path)
+            while True:
+                new_epoch = self._run_batch(toxic_comments=self._toxic_comments_test)
+                if new_epoch:
+                    break
