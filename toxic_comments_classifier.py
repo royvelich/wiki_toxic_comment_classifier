@@ -120,7 +120,8 @@ class ToxicComment:
 
 
 class GloveModel:
-    def __init__(self):
+    def __init__(self, results_directory):
+        self._results_directory = results_directory
         self.initialize()
 
     def initialize(self):
@@ -135,17 +136,17 @@ class GloveModel:
 
     def load_glove_model(self, glove_model_file_path):
         valid_model_on_disk = False
-        if os.path.exists('.\\glove_model_tokens.pickle'):
-            if os.path.exists('.\\glove_model_embeddings.pickle'):
-                if os.path.exists('.\\glove_model_token_to_embedding.pickle'):
+        if os.path.exists(os.path.join(self._results_directory, 'glove_model_tokens.pickle')):
+            if os.path.exists(os.path.join(self._results_directory, 'glove_model_embeddings.pickle')):
+                if os.path.exists(os.path.join(self._results_directory, 'glove_model_token_to_embedding.pickle')):
                     valid_model_on_disk = True
 
         if valid_model_on_disk is True:
-            with open('.\\glove_model_tokens.pickle', 'rb') as handle:
+            with open(os.path.join(self._results_directory, 'glove_model_tokens.pickle'), 'rb') as handle:
                 self._tokens = pickle.load(handle)
-            with open('.\\glove_model_embeddings.pickle', 'rb') as handle:
+            with open(os.path.join(self._results_directory, 'glove_model_embeddings.pickle'), 'rb') as handle:
                 self._embeddings = pickle.load(handle)
-            with open('.\\glove_model_token_to_embedding.pickle', 'rb') as handle:
+            with open(os.path.join(self._results_directory, 'glove_model_token_to_embedding.pickle'), 'rb') as handle:
                 self._token_to_embedding = pickle.load(handle)
         else:
             self.initialize()
@@ -156,11 +157,11 @@ class GloveModel:
                 token, embedding = self.parse_line(line)
                 self.append_model(token, embedding)
 
-            with open('.\\glove_model_tokens.pickle', 'wb') as handle:
+            with open(os.path.join(self._results_directory, 'glove_model_tokens.pickle'), 'wb') as handle:
                 pickle.dump(self._tokens, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            with open('.\\glove_model_embeddings.pickle', 'wb') as handle:
+            with open(os.path.join(self._results_directory, 'glove_model_embeddings.pickle'), 'wb') as handle:
                 pickle.dump(self._embeddings, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            with open('.\\glove_model_token_to_embedding.pickle', 'wb') as handle:
+            with open(os.path.join(self._results_directory, 'glove_model_token_to_embedding.pickle'), 'wb') as handle:
                 pickle.dump(self._token_to_embedding, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     @staticmethod
@@ -201,10 +202,11 @@ class GloveModel:
 
 
 class ToxicComments:
-    def __init__(self, word_embeddings_model, id, comment_max_length):
+    def __init__(self, results_directory, word_embeddings_model, id, comment_max_length):
         self._id = id
+        self._results_directory = results_directory
         self._comment_max_length = comment_max_length
-        self._toxic_comments_pickle_file_path = '.\\toxic_comments_' + id + '.pickle'
+        self._toxic_comments_pickle_file_path = 'toxic_comments_' + id + '.pickle'
         self._word_embeddings_model = word_embeddings_model
         self.initialize()
 
@@ -221,8 +223,8 @@ class ToxicComments:
         self.shuffle()
 
     def load_toxic_comments_file(self, toxic_comments_file_path):
-        if os.path.exists(self._toxic_comments_pickle_file_path):
-            with open(self._toxic_comments_pickle_file_path, 'rb') as handle:
+        if os.path.exists(os.path.join(self._results_directory, self._toxic_comments_pickle_file_path)):
+            with open(os.path.join(self._results_directory, self._toxic_comments_pickle_file_path), 'rb') as handle:
                 self._toxic_comments = pickle.load(handle)
         else:
             with open(toxic_comments_file_path, encoding="ISO-8859-1") as csv_file:
@@ -232,7 +234,7 @@ class ToxicComments:
                         toxic_comment = ToxicComment(csv_row, self._word_embeddings_model, self._comment_max_length)
                         self._toxic_comments.append(toxic_comment)
 
-            with open(self._toxic_comments_pickle_file_path, 'wb') as handle:
+            with open(os.path.join(self._results_directory, self._toxic_comments_pickle_file_path), 'wb') as handle:
                 pickle.dump(self._toxic_comments, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
             return self._toxic_comments
@@ -327,14 +329,22 @@ class ToxicCommentsRNN:
         if not immidiate_subdirectories:
             self._current_results_id = 1
         else:
-            self._current_results_id = max(map(int, immidiate_subdirectories)) + 1
-        last_directory_name = str(self._current_results_id)
-        self._results_directory = os.path.join(self._results_root_directory, last_directory_name)
-        self._glove_model = GloveModel()
+            previous_results_id = max(map(int, immidiate_subdirectories))
+            previous_directory_name = str(previous_results_id)
+            previous_results_directory = os.path.join(self._results_root_directory, previous_directory_name)
+            if os.path.exists(os.path.join(previous_results_directory, "done.csv")):
+                self._current_results_id = previous_results_id + 1
+            else:
+                self._current_results_id = previous_results_id
+        current_directory_name = str(self._current_results_id)
+        self._results_directory = os.path.join(self._results_root_directory, current_directory_name)
+        if not os.path.exists(self._results_directory):
+            os.makedirs(self._results_directory)
+        self._glove_model = GloveModel(self._results_directory)
         self._glove_model.load_glove_model(glove_model_file_path)
-        self._toxic_comments_train = ToxicComments(self._glove_model, 'train', toxic_comment_max_length)
+        self._toxic_comments_train = ToxicComments(self._results_directory, self._glove_model, 'train', toxic_comment_max_length)
         self._toxic_comments_train.load_toxic_comments(toxic_comments_train_file_path)
-        self._toxic_comments_test = ToxicComments(self._glove_model, 'test', toxic_comment_max_length)
+        self._toxic_comments_test = ToxicComments(self._results_directory, self._glove_model, 'test', toxic_comment_max_length)
         self._toxic_comments_test.load_toxic_comments(toxic_comments_test_file_path)
         self._toxic_comment_max_length = toxic_comment_max_length
         self._state_size = state_size
@@ -579,6 +589,10 @@ class ToxicCommentsRNN:
 
         copyfile(os.path.join(".", "main.py"), os.path.join(self._results_directory, "main.py"))
         copyfile(os.path.join(".", "toxic_comments_classifier.py"), os.path.join(self._results_directory, "toxic_comments_classifier.py"))
+
+        with open(os.path.join(self._results_directory, "done.csv"), 'w', encoding="ISO-8859-1") as myfile:
+            writer = csv.writer(myfile, lineterminator='\n')
+            writer.writerow(["done"])
 
     def test_graph(self, model_file_path):
         with tf.Session() as self._sess:
