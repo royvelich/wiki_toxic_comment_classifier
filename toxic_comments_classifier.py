@@ -318,6 +318,7 @@ class ToxicCommentsRNN:
         self._test_results = []
         self._best_test_results = []
         self._max_auc = 0
+        self._toxic_correctness_sum = 0
 
     def _reset_global_variables(self):
         self._sess.run(tf.global_variables_initializer())
@@ -361,12 +362,15 @@ class ToxicCommentsRNN:
         print("{:<30}".format(" ".join([toxic_comments.id.capitalize(), "Epoch:"])), toxic_comments.current_epoch)
         print("{:<30}".format("Batch:"), toxic_comments.current_batch)
         is_training = True if toxic_comments.id is 'train' else False
+        batch_count = toxic_comments.current_batch + 1
         feed_dict, new_epoch, toxic_comments_batch = self._get_next_batch(toxic_comments=toxic_comments)
         if toxic_comments.id is 'train':
             self._optimize(feed_dict=feed_dict)
         self._run_update_ops(feed_dict=feed_dict)
         accuracy, loss, preds, y, auc = self._get_batch_results(feed_dict=feed_dict)
         toxic_correctness = ToxicCommentsRNN._get_batch_toxic_correctness(preds=preds, y=y)
+        self._toxic_correctness_sum = self._toxic_correctness_sum + toxic_correctness
+        toxic_correctness = self._toxic_correctness_sum / batch_count
         print("{:<30}".format("Accuracy:"), "{0:.2%}".format(accuracy))
         print("{:<30}".format("Toxic Correctness:"), "{0:.4%}".format(toxic_correctness))
         print("{:<30}".format("Loss:"), loss)
@@ -388,6 +392,8 @@ class ToxicCommentsRNN:
                     saver.save(self._sess, ".\\model.ckpt")
                     self._best_test_results = self._test_results
                 self._test_results = []
+
+            self._toxic_correctness_sum = 0
 
         return new_epoch
 
@@ -432,8 +438,8 @@ class ToxicCommentsRNN:
         self._rnn_output_forward = self._rnn_outputs[0]
         self._rnn_output_backward = self._rnn_outputs[1]
         #
-        self._rnn_output_forward_max_pool = tf.reduce_max(self._rnn_output_forward, 2)
-        self._rnn_output_backward_max_pool = tf.reduce_max(self._rnn_output_backward, 2)
+        # self._rnn_output_forward_max_pool = tf.reduce_max(self._rnn_output_forward, 2)
+        # self._rnn_output_backward_max_pool = tf.reduce_max(self._rnn_output_backward, 2)
         # self._rnn_output_concatenated = tf.concat([self._rnn_output_forward_max_pool, self._rnn_output_backward_max_pool], 1)
 
         # Get last RNN output
@@ -444,7 +450,7 @@ class ToxicCommentsRNN:
 
         shape = [self._rnn_output_forward.shape[0], self._rnn_output_forward.shape[1] * self._rnn_output_forward.shape[2]]
         self._rnn_output_concatenated = tf.concat([tf.reshape(self._rnn_output_forward, shape), tf.reshape(self._rnn_output_backward, shape)], axis=1)
-        self._fc1 = tf.contrib.layers.fully_connected(inputs=self._rnn_output_concatenated, num_outputs=80)
+        self._fc1 = tf.contrib.layers.fully_connected(inputs=self._rnn_output_concatenated, num_outputs=200)
         self._fc1_dropout = tf.contrib.layers.dropout(inputs=self._fc1, is_training=self._is_training, keep_prob=0.5)
         self._fc2 = tf.contrib.layers.fully_connected(inputs=self._fc1_dropout, num_outputs=50)
         self._fc2_dropout = tf.contrib.layers.dropout(inputs=self._fc2, is_training=self._is_training, keep_prob=0.5)
